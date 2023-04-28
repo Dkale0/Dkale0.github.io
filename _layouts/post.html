@@ -14,7 +14,7 @@ post_class: post-template
 		<!-- Post -->        
         {% assign author = site.authors[page.author] %}
         
-		<div class="col-sm-8">
+		<div class="col-sm-12">
             <!-- Post Featured Image -->
 			{% if page.image %}<img class="featured-image img-fluid rounded" src="{{ site.baseurl }}/{{ page.image }}" alt="{{ page.title }}">{% endif %}
 			<!-- End Featured Image -->
@@ -75,7 +75,7 @@ post_class: post-template
             
             
              <!-- Author Box -->
-                {% if page.author %}				
+                <!-- {% if page.author %}				
 				<div class="row post-top-meta">
 					<div class="col-md-2">
 						<img class="author-thumb" src="{{site.baseurl}}/{{author.avatar}}" alt="{{ author.display_name }}">
@@ -86,7 +86,7 @@ post_class: post-template
 					</div>
 				</div>				
                 {% endif %}
-            
+             -->
             
             <!-- Begin Comments
             ================================================== -->
@@ -106,11 +106,7 @@ post_class: post-template
 
         
 
-		<!-- Sidebar -->
-        <div class="col-sm-4">
-            {% include sidebar.html %}
-            </div>
-        
+
         
 
 	</div>
