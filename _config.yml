@@ -6,9 +6,9 @@ url: "https://dkale0.github.io"
 permalink: "/:title/"
 logo: 'assets/images/logo.png'
 favicon: 'assets/images/favicon.ico'
-author: Sal
+author: darsh
 paginate: 30
-disqus: 'demowebsite'
+disqus: 
 locale: en_us
 lang: en_us
 feed_items: 10
@@ -21,7 +21,8 @@ kramdown:
 sass:
   sass_dir: _sass
   style: :compressed
-ganalytics: UA-113961478-1
+ganalytics: 
+#UA-113961478-1
 
 # Authors
 authors:
@@ -41,12 +42,24 @@ authors:
     web: https://www.wowthemes.net/category/jekyll-themes/
     twitter: https://twitter.com/wowthemesnet
     description: "This is the author box. Write a short description of the author here. You are currently previewing Affiliates theme demo, a Jekyll template compatible with Github pages."
+  darsh:
+    name: Darsh
+    display_name: Darsh
+    avatar: 'assets/images/john.png'
+    email: darshpkale@gmail.com
+    web: 
+    twitter: 
+    description: "This is the author box. Write a short description of the author here. You are currently previewing Affiliates theme demo, a Jekyll template compatible with Github pages."
+    
 
 # Social
 social:
-  instagram: https://www.instagram.com/bootstrapstarter/
-  facebook: https://www.facebook.com/bootstrapstartercom-346329609045284
-  twitter: https://twitter.com/bstartercom
+  instagram: 
+  facebook: 
+  twitter: 
+  github: https://github.com/Dkale0
+  linkedin: https://www.linkedin.com/in/darsh-kale-8a00241b9/
+
 
 # Plugins
 plugins: 
