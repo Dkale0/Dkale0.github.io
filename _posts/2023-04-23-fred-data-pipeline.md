@@ -16,8 +16,11 @@ image: assets/images/fred-pipeline/fred-pipeline-architecture.png
     - [Data Sources](#data-sources)
     - [Airflow DAG Setup](#airflow-dag-setup)
     - [AWS S3: Landing zone for CSV files](#aws-s3-landing-zone-for-csv-files)
-- [Lambda - ETL Job](#lambda---etl-job)
-- [AWS Timestream Setup](#aws-timestream-setup)
+- [AWS Lambda: ETL Job](#aws-lambda-etl-job)
+    - [AWS Lambda Setup](#aws-lambda-setup)
+    - [ETL Overview: Batch Writing to Timestream](#etl-overview-batch-writing-to-timestream)
+- [AWS Timestream: Time Series Data Warehouse](#aws-timestream-time-series-data-warehouse)
+    - [AWS Timestream Setup](#aws-timestream-setup)
 - [Temporal Fusion Transformer - Forecasting Inflation in US](#temporal-fusion-transformer---forecasting-inflation-in-us)
 
 
@@ -373,21 +376,39 @@ Next, we can see all the files that have been added to the folder for FRED, afte
 
 <img src="/assets/images/fred-pipeline/csv_series_fred_s3.png" alt="Image 2" style="width:500px;">
 
-## Lambda - ETL Job 
+## AWS Lambda: ETL Job 
 
-This ETL (Extract, Transform, Load) job is a Python script that runs as an AWS Lambda function. Its purpose is to read multiple CSV files from an S3 bucket, transform the data, and write it to Amazon Timestream, a fully managed time series database.
-
-Here is a brief summary of the job steps:
-
-- Define the S3 bucket, Timestream client, and the database and table names.
-- Create a Timestream table using the create_timestream_table function.
-- Read the CSV files from the S3 bucket and merge them into a single Pandas dataframe using the read_s3_csv_multiple function.
-- Transform the data and write it to Timestream using the create_timestream_records_df function. The important transformations include:
-  - Checking if ent
-
-The script uses several AWS services, including AWS Lambda, Amazon S3, and Amazon Timestream. The primary function is create_timestream_records_df, which formats the data from the Pandas dataframe and writes it to Timestream. The table is configured to store data in both memory and magnetic stores, with different retention periods for each.
+This __ETL (Extract, Transform, Load)__ job comprises a Python script that functions as an AWS Lambda triggered by Airflow following successful ingestion of data into S3. The job reads and transforms multiple CSV files from an S3 bucket, and then writes the data to Amazon Timestream, a fully managed time series database. Notably, if a Timestream Table already contains data, only missing or future values are inserted into the database. The following are the primary steps of this job:
 
 
-## AWS Timestream Setup 
+#### AWS Lambda Setup
+
+Lambda Setup:
+- Memory: 128 MB, Ephemeral Storage: 512 MB, Timeout: 2 min (price per 1ms: $0.0000000083, __Free Tier Eligible__)
+- We add a __layer__ to our lambda function to allow us to work with pandas (arn:aws:lambda:us-east-2:336392948345:layer:AWSSDKPandas-Python39:6).
+- We assign an create an __IAM Role__ with full read/write access to Timestream and S3, and assign it to the lambda function
+
+#### ETL Overview: Batch Writing to Timestream
+
+ETL Steps:
+- Define the S3 bucket, Timestream client, and the database and table names, utilizing the __boto3__ package for python to communicate with AWS services.
+- Create a Timestream table with the create_timestream_table function, as detailed in the (#AWS Timestream Setup) section.
+- __Extract:__ Read CSV files from each folder in the S3 bucket and merge them into a single Pandas dataframe through __joining on date_index.__
+- __Transform:__ Convert pandas datetime to Unix timestamp and create a Timestream record if year >= 1970 (or has a __non-negative Unix__ value).
+- __Load:__ Batch write to Timestream with a __batch size of 100 Timestream records__ to maximize throughput.
+
+## AWS Timestream: Time Series Data Warehouse
+
+AWS Timestream is a __fully managed time-series database service__ offered by Amazon Web Services (AWS) that is designed to handle large-scale time series data with high durability and availability. __Unlike traditional SQL databases, Timestream is optimized for handling time series data__ and provides features like automatic scaling, data retention management, and the ability to query large datasets quickly. One of the main advantages of Timestream over traditional databases is that it allows for efficient and easy storage and retrieval of time series data at scale.
+
+Other populer alternatives to Timstream include __InfluxDB, OpenTSDB, and TimescaleDB__. These databases provide similar features to Timestream, but they may differ in terms of performance, scalability, and ease of use. InfluxDB, for instance, is a popular open-source time-series database that offers high write and query performance and supports SQL-like query languages. OpenTSDB is another popular open-source database that provides horizontal scaling and advanced features like histograms and percentile aggregations. TimescaleDB is an open-source database that extends PostgreSQL to handle time-series data and provides features like automatic data partitioning and multi-node clustering. However, Timestream is specifically designed and __optimized for the AWS ecosystem__, which makes it a better choice if you are already using AWS services and need a fully managed time-series database that can easily integrate with other AWS services.
+
+#### AWS Timestream Setup
+
+Our created Timestream table has the following properties:
+
+- Database retention period: 73000 days for magnetic store (Max amount for historical data) and 24 hours for memory store
+- Memory store and magnetic store writes are enabled
+- Magnetic store rejected data is stored in an S3 bucket with Server-Side Encryption (SSE-S3)
 
 ## Temporal Fusion Transformer - Forecasting Inflation in US
