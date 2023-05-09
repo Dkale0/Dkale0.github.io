@@ -1,12 +1,12 @@
 ---
 layout: post
-title:  "Housing Prices"
+title:  "Housing Prices Analysis"
 author: darsh
 categories: []
-image: assets/images/4.jpg
+image: assets/images/housing_prices/distribution.png
 ---
 
-
+Kaggle - Housing Prices Dataset - PCA / Decision Trees / Random Forests
 
 <html>
 

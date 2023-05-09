@@ -3,10 +3,10 @@ layout: post
 title:  "SEC Filings Web Scraping"
 author: darsh
 categories: []
-image: assets/images/4.jpg
+image: assets/images/sec_web_scraping/bs4_scraping_t.png
 ---
 
-## SEC Filings Web Scraping
+
 
 In this project we will make extracting information from the SEC Filings (10-K and 10-q) easily accessible and automate the process of retrieving only necessery data since these filings can be filled with information that may not be relavant. There are two classes we create to encapsulate the fuctionality for web scraping SEC filing from the EGAR Database and Parsing these filings that are in xml form. Note: there is a known [403 Forbidden error](https://github.com/jadchaar/sec-edgar-downloader/issues/77) in 2021 (unfixed, solution explained later) that prevents us from getting the filings in the xml form, which would have been ideal since the format is consistent across different filings for each company and make the extraction of tables very easy.
 

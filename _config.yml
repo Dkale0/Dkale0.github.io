@@ -4,7 +4,7 @@ timezone: UTC
 baseurl: ""
 url: "https://dkale0.github.io"
 permalink: "/:title/"
-logo: 'assets/images/logo.png'
+logo: 'assets/images/logo-1.png'
 favicon: 'assets/images/favicon.ico'
 author: darsh
 paginate: 30

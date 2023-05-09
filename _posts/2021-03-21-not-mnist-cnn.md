@@ -3,7 +3,7 @@ layout: post
 title:  "notMNIST Dataset - CNN"
 author: darsh
 categories: []
-image: assets/images/6.jpg
+image: assets/images/notmnist/CNN_architecture.jpeg
 ---
 
 ## Handwritten letters image recognition using CNN (notMINST dataset)
