@@ -21,17 +21,22 @@ image: assets/images/fred-pipeline/fred-pipeline-architecture.png
     - [ETL Overview: Batch Writing to Timestream](#etl-overview-batch-writing-to-timestream)
 - [AWS Timestream: Time Series Data Warehouse](#aws-timestream-time-series-data-warehouse)
     - [AWS Timestream Setup](#aws-timestream-setup)
-- [Temporal Fusion Transformer - Forecasting Inflation in US](#temporal-fusion-transformer---forecasting-inflation-in-us)
+- [Forecasting US Inflation with Temporal Fusion Transformer DNN](#forecasting-us-inflation-with-temporal-fusion-transformer-dnn)
 
 
 ##  Overview: Building a Scalable Time Series Data Pipeline
 
-This project involved designing and implementing a robust data pipeline that collects monthly time series data from multiple sources, including FRED, US Census, AlphaVantage, and SEC Edgar, utilizing their respective APIs. __Airflow__, running within a __Docker container__, orchestrates the pipeline's logic as a single DAG. A Python operator within the DAG extracts data from each API and stores it in CSV format within an __S3 bucket__ acting as a data lake/landing zone. The pipeline guarantees the rate limit for each API is respected by limiting Airflow's maximum parallelism. After the data is stored within the S3 bucket, a __Lambda ETL task__ is initiated to read CSV files, apply necessary transformations, and upload the data to __AWS Timestream data warehouse__. Users can query time series data effortlessly utilizing SQL queries written on the AWS Query Editor. Moreover, we created a __Temporal Fusion Transformer (TFT) model__, which predicts inflation (CPI) in the US. This model is deployed on a local Jupyter notebook leveraging CUDA and can also be deployed on a SageMaker instance, enabling continuous data ingestion and prediction.
+This project involved designing and implementing a robust data pipeline that collects monthly time series data from multiple sources, including FRED, US Census, AlphaVantage, and SEC Edgar, utilizing their respective APIs. __Airflow__, running within a __Docker container__, orchestrates the pipeline's logic as a single DAG. A Python operator within the DAG extracts data from each API and stores it in CSV format within an __S3 bucket__ acting as a data lake/landing zone. The pipeline guarantees the rate limit for each API is respected by limiting Airflow's maximum parallelism. After the data is stored within the S3 bucket, a __Lambda ETL task__ is initiated to read CSV files, apply necessary transformations, and upload the data to __AWS Timestream data warehouse__. Users can query time series data effortlessly utilizing SQL queries written on the AWS Query Editor. Moreover, we created a __Temporal Fusion Transformer (TFT) model__, which predicts inflation (CPI) in the US. This model is deployed on a local Jupyter notebook leveraging CUDA and can also be deployed on a SageMaker instance, enabling continuous data ingestion and prediction. 
+
+
+<img src="/assets/images/fred-pipeline/fred-pipeline-architecture.png" alt="Image 1" style="width:800px;">
 
 
 ## Pipeline Orchestration: Streamlining Data Pipeline Management with Airflow on Docker
 
 For orchestration, __Airflow__ is a popular __open-source platform__ for managing data pipelines. Its __modular and scalable architecture__ allows users to easily manage and schedule complex workflows. Airflow provides a rich set of built-in operators and plugins for interfacing with a wide variety of data sources and destinations, making it a versatile tool for ETL and general data processing pipelines. Additionally, Airflow's __web interface__ makes it easy to monitor and troubleshoot pipeline execution. However, Airflow can be complex to set up and configure, and scaling horizontally may require additional infrastructure resources. Additionally, users may need to develop custom operators or plugins to interface with certain data sources or destinations.
+
+
 
 #### Setting up Airflow on Docker
 
@@ -212,7 +217,7 @@ The following code is for the python_callable for retrieving data from the third
   </pre>
 </html>
 
-The code for our dag is available below. 
+The code for our dag is shown below. 
 
 <html>
   <head>
@@ -397,6 +402,323 @@ ETL Steps:
 - __Transform:__ Convert pandas datetime to Unix timestamp and create a Timestream record if year >= 1970 (or has a __non-negative Unix__ value).
 - __Load:__ Batch write to Timestream with a __batch size of 100 Timestream records__ to maximize throughput.
 
+The code for this ETL job is displayed below (also on github):
+
+<html>
+  <head>
+    <style>
+      pre {
+        max-height: 500px;
+        overflow-y: scroll;
+        background-color: #f8f8f8;
+        padding: 10px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+
+  <pre class="code-block">
+      <code class="language-python">
+        import json
+        import boto3
+        import re
+        from datetime import datetime, timezone
+        import time
+        import pandas as pd
+        import math
+
+
+        def lambda_handler(event, context):
+            # specify region to be us-east-2 for s3
+            s3 = boto3.resource('s3', region_name='us-east-2')
+            bucket = s3.Bucket('dk-airflow-test-bucket')
+            client = boto3.client('timestream-write', region_name='us-east-2')
+            print(client.meta.region_name)
+            bucket_name = 'dk-airflow-test-bucket'
+            database_name = 'fred-batch-data'
+            table_name = 'csv_series_fred_combined'
+
+            
+            create_timestream_table(client, table_name, database_name)
+
+            df = read_s3_csv_multiple(bucket_name, 'csv-series-fred')
+
+            print(df.head())
+            print(f'df shape: {df.shape}')
+            
+            create_timestream_records_df(client, table_name, database_name, df)
+
+            return "Success"
+
+
+
+        def read_s3_csv(bucket, key):
+            s3 = boto3.resource('s3', region_name='us-east-2')
+            obj = s3.Object(bucket, key)
+            return obj.get()['Body'].read().decode('utf-8').split('\n')
+
+        
+        # read multiple csv files from s3 and return a list of lists of rows with date as index
+
+
+        def read_s3_csv_multiple(bucket, prefix):
+            s3 = boto3.resource('s3', region_name='us-east-2')
+            csv_list = []
+
+            for obj in s3.Bucket(bucket).objects.all():
+                # Get the filename from the object key
+                filename = obj.key.split('/')[-1]
+                print(f'filename: {filename}')
+
+                # Check if file is CSV and not empty
+                if not filename.endswith('.csv') or obj.size == 0:
+                    continue
+
+                # Read the CSV file from S3 into a pandas dataframe
+                csv_obj = s3.Object(bucket, obj.key)
+                body = csv_obj.get()['Body']
+                df = pd.read_csv(body, index_col=0, parse_dates=True)
+
+                # Rename the first column to the filename (without extension)
+                col_name = filename.split('.')[0]
+                df.rename(columns={df.columns[0]: col_name}, inplace=True)
+
+                # Add the dataframe as a new column in the csv_list
+                csv_list.append(df.iloc[:, 0])
+
+            # Combine all the dataframes in the csv_list into a single dataframe using the index as the key
+            final_df = pd.concat(csv_list, axis=1)
+
+            # Add a new column called "date" with the date index as the values
+            final_df['date_index'] = final_df.index
+
+            return final_df
+
+
+
+        def create_timestream_table(client, table_name, database_name):
+            print('table name: ', table_name)
+            try:
+                client.create_table(
+                    DatabaseName=database_name,
+                    TableName=table_name,
+                    RetentionProperties={
+                        'MemoryStoreRetentionPeriodInHours': 24,
+                        'MagneticStoreRetentionPeriodInDays': 73000
+                    },
+                    Tags=[],
+                    MagneticStoreWriteProperties={
+                        'EnableMagneticStoreWrites': True,
+                        'MagneticStoreRejectedDataLocation': {
+                            'S3Configuration': {
+                                'BucketName': 'dk-airflow-test-bucket',
+                                'ObjectKeyPrefix': 'rejected-data/',
+                                'EncryptionOption': 'SSE_S3'
+                            }
+                        }
+                    }
+                )
+                print(f"Created table {table_name} in database {database_name}")
+            except client.exceptions.ValidationException as e:
+                print(f"Error creating table {table_name}: {str(e)}")
+            except Exception as e:
+                print(f"Unknown error creating table {table_name}: {str(e)}")
+
+
+
+        def create_timestream_records(client, table_name, database_name, rows):
+            records_details = {
+                'DatabaseName': database_name,
+                'TableName': table_name,
+            }
+
+            records = []
+            record_counter = 0
+
+            table_name_split = table_name.split('_')
+
+            try:
+                series_name = table_name_split[3]
+            except ValueError:
+                print(table_name_split)
+                series_name = table_name
+                
+
+
+            count = len(rows[1:])
+            print(f"row count: {count}")
+            for row in rows[1:]:
+                values = row.split(',')
+                if len(values) != 2:
+                    print(f"Error: {row} does not have 2 values (lmd)")
+                    print(f"values: {values}")
+                    continue
+                    
+                # Convert timestamp to unix
+                try:
+                    values[0] = re.sub(r"[-]", "/", values[0])
+                    if validate_y_m_d(values[0]) == True:
+                        date_obj = datetime.strptime(values[0], '%Y/%m/%d')
+                    else:
+                        date_obj = datetime.strptime(values[0], '%m/%d/%Y')
+                    if date_obj < datetime(1970, 1, 1):
+                        continue
+                    
+                    timestamp = int(date_obj.timestamp() * 1000)
+                    #print('entered this')
+                except ValueError:
+                    #print(f"Invalid date string: {values[0]}")
+                    continue
+
+                
+
+                #print(f'exited after')
+                # Create a new record with the current time as the timestamp
+                current_time = str(int(round(time.time() * 1000)) - (count))
+                #print(f'current time: {current_time}')
+
+          
+
+                multi_record = {
+                    'Dimensions': [
+                        {'Name': 'S3 Region', 'Value': 'us-east-2'}
+                    ],
+                    'MeasureValueType': 'MULTI',
+                    'MeasureName': series_name,
+                    'Time': current_time,
+                    'MeasureValues': [
+                    {'Name': 'Date', 'Type': 'TIMESTAMP', 'Value': str(timestamp)},
+                    {'Name': 'Value', 'Type': 'DOUBLE', 'Value': str(values[1]) }
+                    ]
+                }
+
+                records.append(multi_record)
+                record_counter += 1
+                count += 10
+
+                if len(records) == 100:
+                    batch_to_timestream(client, table_name, database_name, records, record_counter)
+                    records= []
+
+            if len(records) != 0:
+                batch_to_timestream(client, table_name, database_name, records, record_counter) 
+
+            #print(f"table {table_name}, with {len(records['Records'])} actual records")
+            return True
+
+
+        def create_timestream_records_df(client, table_name, database_name, df):
+            records = []
+            record_counter = 0
+            count = 0
+
+            for index, row in df.iterrows():
+
+                # Check if the date in 'date_index' column is before the Unix time
+                if row['date_index'] < datetime(1970, 1, 1):
+                  # print(f"Invalid date string: {row['date_index']}")
+                    continue
+
+                current_time = str(int(round(time.time() * 1000)) - (record_counter*100))
+
+                # create measure values for each column in the row
+                measure_values = []
+                for col in df.columns:
+                    if col == 'date_index':
+                    
+                        #ts_date = datetime.strptime(row[col], '%Y-%m-%d %H:%M:%S')
+                        ts_date = row[col].to_pydatetime()
+                        timestamp = int(ts_date.timestamp() * 1000)
+                        print(f'type = {type(row[col])} ,row[col]: {row[col]},  Timestamp: {timestamp}')
+                  
+
+                        measure_values.append({'Name': 'date_index', 'Type': 'TIMESTAMP', 'Value': str(timestamp)})
+
+                        
+                        
+                    else:
+                    # Check for NaN values and replace them with null
+                        value = row[col]
+                        if pd.isna(value):
+                            value = str(float(0.0))
+                        else:
+                            value = str(value)
+                        col_name = col.split('-')[0]
+                        measure_values.append({'Name': col_name, 'Type': 'DOUBLE', 'Value': value})
+
+                # Create a new record with the current time as the timestamp
+                multi_record = {
+                    'Dimensions': [
+                        {'Name': 'S3 Region', 'Value': 'us-east-2'}
+                    ],
+                    'MeasureValueType': 'MULTI',
+                    'MeasureName': 'fred_pipeline_measure',
+                    'Time': current_time,
+                    'MeasureValues': measure_values
+                }
+
+                records.append(multi_record)
+                record_counter += 1
+
+                if len(records) == 100:
+                    batch_to_timestream(client, table_name, database_name, records, record_counter)
+                    records = []
+
+            if len(records) != 0:
+                batch_to_timestream(client, table_name, database_name, records, record_counter)
+
+            return True
+
+
+
+
+        def batch_to_timestream(client, table_name, database_name, records, counter):
+            try:
+                result = client.write_records(DatabaseName=database_name, TableName=table_name,
+                                                    Records=records, CommonAttributes={})
+                print("Processed [%d] records. WriteRecords Status: [%s]" % (counter,
+                                                                                result['ResponseMetadata']['HTTPStatusCode']))
+            except client.exceptions.RejectedRecordsException as err:
+                print("RejectedRecords: ", err)
+                for rr in err.response["RejectedRecords"]:
+                    print("Rejected Index " + str(rr["RecordIndex"]) + ": " + rr["Reason"])
+                print("Other records were written successfully. ")
+            except Exception as err:
+                print("Error:", err)
+
+        def delete_table(client, table_name, database_name):
+            print("Deleting Table")
+            try:
+                result = client.delete_table(DatabaseName=database_name, TableName=table_name)
+                print("Delete table status [%s]" % result['ResponseMetadata']
+                ['HTTPStatusCode'])
+            except client.exceptions.ResourceNotFoundException:
+                print("Table [%s] doesn't exist" % table_name)
+            except Exception as err:
+                print("Delete table failed:", err)
+
+            
+        def validate_y_m_d(date_str):
+            pattern = r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$'
+            match = re.match(pattern, date_str)
+            if not match:
+                return False
+            year, month, day = match.groups()
+            year = int(year)
+            month = int(month)
+            day = int(day)
+            try:
+                datetime(year, month, day)
+                return True
+            except ValueError:
+                return False
+
+
+ 
+      </code>
+  </pre>
+</html>
+
 ## AWS Timestream: Time Series Data Warehouse
 
 AWS Timestream is a __fully managed time-series database service__ offered by Amazon Web Services (AWS) that is designed to handle large-scale time series data with high durability and availability. __Unlike traditional SQL databases, Timestream is optimized for handling time series data__ and provides features like automatic scaling, data retention management, and the ability to query large datasets quickly. One of the main advantages of Timestream over traditional databases is that it allows for efficient and easy storage and retrieval of time series data at scale.
@@ -407,8 +729,10 @@ Other populer alternatives to Timstream include __InfluxDB, OpenTSDB, and Timesc
 
 Our created Timestream table has the following properties:
 
-- Database retention period: 73000 days for magnetic store (Max amount for historical data) and 24 hours for memory store
+- Database retention period: __73000 days for magnetic store__ (Max amount for historical data) and __24 hours for memory store__
+  - Note: Magnetic Store is for larger volume & cost effective long storage, while memory store is for faster access of recently stored data
 - Memory store and magnetic store writes are enabled
-- Magnetic store rejected data is stored in an S3 bucket with Server-Side Encryption (SSE-S3)
+- Magnetic store __rejected data is stored in an S3 bucket__ with Server-Side Encryption (SSE-S3)
 
-## Temporal Fusion Transformer - Forecasting Inflation in US
+## Forecasting US Inflation with Temporal Fusion Transformer DNN
+
